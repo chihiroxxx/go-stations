@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"net/http"
 
 	"github.com/TechBowl-japan/go-stations/model"
 )
@@ -25,8 +26,33 @@ func (s *TODOService) CreateTODO(ctx context.Context, subject, description strin
 		insert  = `INSERT INTO todos(subject, description) VALUES(?, ?)`
 		confirm = `SELECT subject, description, created_at, updated_at FROM todos WHERE id = ?`
 	)
+	stmt, err := s.db.PrepareContext(ctx, insert)
+	if err != nil {
+		return nil, err
+	}
+	defer stmt.Close()
+	res, err := stmt.ExecContext(ctx, subject, description)
 
-	return nil, nil
+	if err != nil {
+		return nil, err
+	}
+
+	id, err := res.LastInsertId()
+	if err != nil {
+		return nil, err
+	}
+
+	stmt, err = s.db.PrepareContext(ctx, confirm)
+	row := stmt.QueryRowContext(ctx, id)
+
+	var todo *model.TODO = new(model.TODO)
+	if err := row.Scan(&todo.Subject, &todo.Description, &todo.CreatedAt, &todo.UpdatedAt); err != nil {
+		err = row.Err()
+		return nil, err
+	}
+	todo.ID = int(id)
+
+	return todo, nil
 }
 
 // ReadTODO reads TODOs on DB.
@@ -45,8 +71,32 @@ func (s *TODOService) UpdateTODO(ctx context.Context, id int64, subject, descrip
 		update  = `UPDATE todos SET subject = ?, description = ? WHERE id = ?`
 		confirm = `SELECT subject, description, created_at, updated_at FROM todos WHERE id = ?`
 	)
-
-	return nil, nil
+	stmt, err := s.db.PrepareContext(ctx, update)
+	if err != nil {
+		return nil, err
+	}
+	defer stmt.Close()
+	res, err := stmt.ExecContext(ctx, subject, description, id)
+	if err != nil {
+		return nil, err
+	}
+	affrow, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if affrow == 0 {
+		// return nil, err.Er
+		return nil, &model.ErrNotFound{ErrCode: http.StatusNotFound}
+	}
+	stmt, err = s.db.PrepareContext(ctx, confirm)
+	row := stmt.QueryRowContext(ctx, id)
+	var todo *model.TODO = new(model.TODO)
+	if err := row.Scan(&todo.Subject, &todo.Description, &todo.CreatedAt, &todo.UpdatedAt); err != nil {
+		err = row.Err()
+		return nil, err
+	}
+	todo.ID = int(id)
+	return todo, nil
 }
 
 // DeleteTODO deletes TODOs on DB by ids.
